@@ -1,0 +1,30 @@
+<Configuration>
+	<Providers>
+		<Provider>
+			<Name>IBQuotes</Name>
+			<Type>com.cloudfree.IB.IBQuotesProvider</Type>
+			<Params>
+				<Host>localhost</Host>
+				<Port>7496</Port>
+				<ClientID>9999</ClientID>
+				<Options></Options>
+			</Params>
+			<Subscribers>
+				<Subscriber>
+					<Name>IB_MT5</Name>
+					<Type>com.cloudfree.IB.IBQuotesSubscriber</Type>
+				</Subscriber>
+			</Subscribers>
+		</Provider>
+		<Provider>
+			<Name>CTPQuotes</Name>
+			<Type>com.cloudfree.ctp.CTPQuotesProvider</Type>
+			<Params>
+				<Host>localhost</Host>
+				<Port>7496</Port>
+				<Client>9999</Client>
+				<Options></Options>
+			</Params>
+		</Provider>
+	</Providers>
+</Configuration>

@@ -1,0 +1,14 @@
+{
+	"ConfigSymbols" : [
+		{
+		"Symbol" : "ZB 201809",
+		"ContractID" : "300356957",
+		"Description" : "CBOT 30 year Treasury Bond Future 201809",
+		"LastTrade" : "20180919"
+		"Basis" : "",
+		"CurrencyBase" : "USD",
+		"Digits" : "2",
+		}
+
+	]
+}

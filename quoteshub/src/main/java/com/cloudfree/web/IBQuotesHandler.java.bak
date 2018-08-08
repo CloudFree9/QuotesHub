@@ -1,0 +1,348 @@
+package com.cloudfree.web;
+
+import java.io.IOException;
+import java.io.PrintWriter;
+import java.net.InetAddress;
+import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.List;
+import javax.servlet.ServletException;
+import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServletResponse;
+
+import org.eclipse.jetty.server.Request;
+
+import com.ib.client.Contract;
+import com.ib.client.ContractDetails;
+import com.ib.controller.GenController.ICommonHandler;
+import com.cloudfree.IB.EWrapperHandlers;
+import com.cloudfree.IB.EWrapperHandlers.HistoricalDataHandler;
+import com.cloudfree.IB.EWrapperHandlers.RealTimeBarHandler;
+import com.cloudfree.IB.EWrapperHandlers.TopMktDataHandler;
+import com.cloudfree.IB.IBContract;
+import com.cloudfree.IB.IBQuotesSubscriber;
+import com.cloudfree.mt5.UDPDest;
+
+
+public class IBQuotesHandler extends GenericQuotesHandler {
+
+	public static class Functions {
+		
+		public static final String REQ_REALTIMEBAR = "realtimebar";
+		public static final String CANCEL_REALTIMEBAR = "crealtimebar";
+		public static final String REQ_HISTBAR = "histbar";
+		public static final String CANCEL_HISTBAR = "chistbar";
+		public static final String REQ_REALTIMETICK = "rtick";
+		public static final String CANCEL_REALTIMETICK = "crtick";
+		public static final String REQ_GENERAL = "general";
+		public static final String CANCEL_GENERAL = "cgeneral";
+		
+	}
+	
+	public static String type = "IBQuotesHandler";
+	public Object m_Syncobj = new Object();
+	
+	private HashSet<String> m_FunctionMap = new  HashSet<String>() {
+
+		private static final long serialVersionUID = 3005611065796060039L;
+
+		{
+			add(Functions.REQ_REALTIMEBAR);
+			add(Functions.CANCEL_REALTIMEBAR);
+			add(Functions.REQ_HISTBAR);
+			add(Functions.CANCEL_HISTBAR);
+			add(Functions.REQ_REALTIMETICK);
+			add(Functions.CANCEL_REALTIMETICK);
+			add(Functions.REQ_GENERAL);
+			add(Functions.CANCEL_GENERAL);
+		}
+	};
+	
+	public IBQuotesHandler(IBQuotesSubscriber s) {
+		super(s);
+//		m_List = new LinkedList<ContractDetails>();
+	}
+
+	
+	@Override
+	public void handle(String target, Request baseRequest, HttpServletRequest request, HttpServletResponse response)
+			throws IOException, ServletException {
+				
+        response.setContentType("text/html; charset=utf-8");
+        response.setStatus(HttpServletResponse.SC_OK);
+        PrintWriter out = response.getWriter();
+
+        String t = target.substring(1).toLowerCase();
+        
+        if (!m_FunctionMap.contains(t)) {
+			out.printf("{'res':'error', 'reason': 'unknown request. Check if the correct handler is set.'}");
+			baseRequest.setHandled(true);
+			return;        	
+        }
+
+        try {
+	        switch (t) {
+	        case Functions.REQ_REALTIMEBAR:
+				RequestQuotes(target, baseRequest, request, response, ICommonHandler.REALTIMEBAR);
+	        	break;
+	        case Functions.CANCEL_REALTIMEBAR:
+	        	CancelQuotes(target, baseRequest, request, response, ICommonHandler.REALTIMEBAR);
+	        	break;
+	        case Functions.REQ_HISTBAR:
+	        	RequestQuotes(target, baseRequest, request, response, ICommonHandler.HISTORICALBAR);
+	        	break;
+	        case Functions.CANCEL_HISTBAR:
+	        	CancelQuotes(target, baseRequest, request, response, ICommonHandler.HISTORICALBAR);
+	        	break;
+	        case Functions.REQ_REALTIMETICK:
+	        	RequestQuotes(target, baseRequest, request, response, ICommonHandler.REALTIMETICK);
+	        	break;
+	        case Functions.CANCEL_REALTIMETICK:
+	        	CancelQuotes(target, baseRequest, request, response, ICommonHandler.REALTIMETICK);
+	        	break;
+	        case Functions.REQ_GENERAL:
+				General(target, baseRequest, request, response);
+	        	break;
+	        case Functions.CANCEL_GENERAL:
+	        	CancelGeneral(target, baseRequest, request, response);
+	        	break;
+	        default:
+				out.printf("{'res':'error', 'reason': 'undefined request.'}\n");
+	        }
+        } catch(Exception e) {
+        	e.printStackTrace();
+        }
+
+		baseRequest.setHandled(true);
+	}
+	
+	private void CancelGeneral(String target, Request baseRequest, HttpServletRequest request,
+			HttpServletResponse response) throws IOException {
+		PrintWriter out = response.getWriter();
+		out.printf("{'res':'ok', 'info': 'nothing defined now.'}\n");
+	}
+
+	private void General(String target, Request baseRequest, HttpServletRequest request, HttpServletResponse response) throws Exception {
+		
+		String action = baseRequest.getParameter("act");
+		if (action == null) action = "";
+		PrintWriter out = response.getWriter();
+        
+        switch(action) {
+       	case "getinst":
+       		GetInstruments(target, baseRequest, request, response);
+       		break;
+       	default:
+       		out.printf("{'res':'error', 'reason': 'unknown action.'}");
+       }
+       baseRequest.setHandled(true);
+	}
+
+	private synchronized void GetInstruments(String target, Request baseRequest, HttpServletRequest request,
+			HttpServletResponse response) throws Exception {
+		
+		String inst = baseRequest.getParameter("instruments");
+		if (inst == null) inst = "";
+		
+		PrintWriter out = response.getWriter();
+		
+		String insts[] = inst.split(",");
+		IBQuotesSubscriber s = (IBQuotesSubscriber) m_ActiveSubscriber;
+		List<ContractDetails> contracts = new LinkedList<ContractDetails>();
+		
+		for (int j=0;j<insts.length;j++) {
+			
+			int conid;
+			
+			if (!insts[j].matches("^\\d+$")) {
+				continue;
+			}
+			
+			conid = Integer.parseInt(insts[j]);
+	        Contract con = new Contract();
+	        con.conid(conid);
+	 
+        	List<ContractDetails> cds = s.GetContractDetails(con);
+        	if (cds == null || cds.size() == 0) continue;
+	        contracts.addAll(cds);
+		}
+		
+	   	out.println("[");
+		for (ContractDetails cd: contracts) {
+        	out.println("\t{");
+			out.printf("\t\t\"id\" : \"%d\", \n", cd.contract().conid());
+			out.printf("\t\t\"symbol\" : \"%s\", \n", cd.contract().symbol());
+			out.printf("\t\t\"localsymbol\" : \"%s\", \n", cd.contract().localSymbol());
+			out.printf("\t\t\"description\" : \"%s\", \n", cd.contract().description());
+			out.printf("\t\t\"marketname\" : \"%s\", \n", cd.marketName());
+			out.printf("\t\t\"lasttrade\" : \"%s\", \n", cd.contract().lastTradeDateOrContractMonth());
+			out.printf("\t\t\"tradingclass\" : \"%s\", \n", cd.contract().tradingClass());
+			out.printf("\t\t\"currency\" : \"%s\", \n", cd.contract().currency());
+			out.printf("\t\t\"multiplier\" : \"%s\" \n", cd.contract().multiplier());
+			out.printf("\t\t\"secid\" : \"%s\" \n", cd.contract().secId());
+			out.printf("\t\t\"secidtype\" : \"%s\" \n", cd.contract().getSecIdType());
+			out.printf("\t\t\"right\" : \"%s\" \n", cd.contract().getRight());
+			out.printf("\t\t\"sectype\" : \"%s\" \n", cd.contract().getSecType());
+			out.printf("\t}");
+		}
+				
+		out.println("\n]");
+ 	}
+/*
+	private void CancelQuotes(String target, Request baseRequest, HttpServletRequest request,
+			HttpServletResponse response, int type) throws IOException {
+		
+		String instrument = baseRequest.getParameter("instrument");
+
+		response.setContentType("text/html; charset=utf-8");
+        response.setStatus(HttpServletResponse.SC_OK);
+        PrintWriter out = response.getWriter();
+
+		if (instrument == null || instrument.equals("")) {
+			out.printf("{'res':'error', 'reason': 'unknown instrument'}");
+			baseRequest.setHandled(true);
+			return;
+        }
+
+		String insts[] = instrument.split(",");
+        IBQuotesSubscriber s = (IBQuotesSubscriber) m_ActiveSubscriber;
+
+        for (int j=0;j<insts.length;j++) {
+			
+			int conid;
+			if (!insts[j].matches("^\\d+$")) {
+				continue;
+			}
+			
+			conid = Integer.parseInt(insts[j]);
+	        Contract con = new Contract();
+	        con.conid(conid);
+
+			List<ContractDetails> cds = null;
+			
+			try {
+				cds = s.GetContractDetails(con);
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
+			
+			if (cds == null || cds.size() ==0) continue;
+
+			con = cds.get(0).contract();
+			
+			IBContract c = new IBContract(con);
+			ICommonHandler h = s.GetHandler(c, type);
+			
+			if (h == null) continue;
+			
+			switch (type) {
+			case ICommonHandler.REALTIMEBAR:
+				s.CancelRealTimeBars((RealTimeBarHandler) h);
+				break;
+			case ICommonHandler.HISTORICALBAR:
+				s.CancelHistoricalBars((HistoricalDataHandler) h);
+				break;
+			case ICommonHandler.REALTIMETICK:
+				s.CancelRealTimeTicks((TopMktDataHandler) h);
+				break;
+			default:
+				return;
+			}
+		}
+        
+		out.printf("{\"res\":\"ok\", \"info\": \"Historical Bar cancelled.\"}\n");
+		
+	}
+*/
+	private void RequestQuotes(String target, Request baseRequest, HttpServletRequest request,
+			HttpServletResponse response, int type) throws Exception {
+		String instrument = baseRequest.getParameter("instrument");
+		String sport = baseRequest.getParameter("port");
+		
+        response.setContentType("text/html; charset=utf-8");
+        response.setStatus(HttpServletResponse.SC_OK);
+
+        PrintWriter out = response.getWriter();
+
+		if (instrument == null || instrument.equals("")) {
+			out.printf("{'res':'error', 'reason': 'unknown instrument'}");
+			baseRequest.setHandled(true);
+			return;
+        }
+ 
+		if (sport == null || !sport.matches("^\\d+$")) {
+			out.printf("{'res':'error', 'reason': 'invalid port'}");
+			baseRequest.setHandled(true);
+			return;
+        }
+		
+		int port = Integer.parseInt(sport);
+		String insts[] = instrument.split(",");
+ 
+		
+		InetAddress addr = baseRequest.getRemoteInetSocketAddress().getAddress();
+		UDPDest ud = new UDPDest(addr.getHostName(), port);
+		IBQuotesSubscriber s = (IBQuotesSubscriber)m_ActiveSubscriber;
+		
+		out.printf("{\"res\":\"ok\", \"addr\": \"%s\", \"Port\": \"%d\", \"instruments\": \"%s\"}", addr.getHostName(), port, instrument);		
+
+		new Thread() {
+			
+			public void run() {
+				
+		        for (int j=0;j<insts.length;j++) {
+					
+					int conid;
+					if (!insts[j].matches("^\\d+$")) {
+						continue;
+					}
+					
+					conid = Integer.parseInt(insts[j]);
+			        Contract con = new Contract();
+			        con.conid(conid);
+
+					List<ContractDetails> cds = null;
+					
+					try {
+						cds = s.GetContractDetails(con);
+					} catch (Exception e) {
+						e.printStackTrace();
+					}
+					
+					if (cds == null || cds.size() ==0) continue;
+
+//					con = cds.get(0).contract();
+//					IBContract c = new IBContract(con);
+					
+					IBContract ibcon = new IBContract(cds.get(0).contract());
+					ICommonHandler h = s.GetHandler(ibcon, type);
+
+					try {
+						if (h == null) {
+							switch (type) {
+							case ICommonHandler.REALTIMEBAR:
+								h = EWrapperHandlers.RealTimeBarHandler.GetRealTimeHandler(s);
+								break;
+							case ICommonHandler.HISTORICALBAR:
+								h = EWrapperHandlers.HistoricalDataHandler.GetHistoricalDataHandler(s);
+								break;
+							case ICommonHandler.REALTIMETICK:
+								h = EWrapperHandlers.TopMktDataHandler.GetInstance(s);
+								break;
+							default:
+								return;
+							}
+							s.Subscribe(ibcon, ud, h);
+							Thread.sleep(500);
+							if (type == ICommonHandler.REALTIMEBAR) 
+								ibcon.EnableVIX(s);
+						}
+					} catch(Exception e) {
+						e.printStackTrace();
+					}
+				}
+			}
+		}.start();
+		
+	}
+}
