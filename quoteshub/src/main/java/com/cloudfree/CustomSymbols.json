@@ -11,23 +11,23 @@
 		"VIX" : "yes"
 		},
 		{
-		"Symbol" : "JPY 201810",
-		"ContractID" : "317631234",
-		"Description" : "CME JPY Future 201810",
-		"LastTrade" : "20181015",
+		"Symbol" : "JPY 201809",
+		"ContractID" : "134471782",
+		"Description" : "CME JPY Future 201809",
+		"LastTrade" : "20180907",
 		"Basis" : "",
 		"CurrencyBase" : "USD",
 		"Digits" : "7",
 		"VIX" : "yes"
 		},
 		{
-		"Symbol" : "ZB 201809",
-		"ContractID" : "300356957",
-		"Description" : "CBOT 30 year Treasury Bond Future 201809",
-		"LastTrade" : "20180919",
+		"Symbol" : "JPY 201812",
+		"ContractID" : "140081942",
+		"Description" : "CBOT 30 year Treasury Bond Future 20181217",
+		"LastTrade" : "20181217",
 		"Basis" : "",
 		"CurrencyBase" : "USD",
-		"Digits" : "2",
+		"Digits" : "7",
 		"VIX" : "yes"
 		}
 	]

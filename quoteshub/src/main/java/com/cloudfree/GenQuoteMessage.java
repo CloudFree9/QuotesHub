@@ -5,19 +5,19 @@ import java.io.Serializable;
 public abstract class GenQuoteMessage implements IQuoteMessage, Serializable {
 
 	private static final long serialVersionUID = 1223731166723008255L;
-	protected double m_Open;
-	protected double m_High;
-	protected double m_Low;
-	protected double m_Close;
-	protected double m_Ask;
-	protected double m_Bid;
-	protected double m_Price;
-	protected long m_Volume;
-	protected long m_TimeStamp;
-	protected long m_TimeStampMs;
+	protected double	m_Open;
+	protected double	m_High;
+	protected double	m_Low;
+	protected double	m_Close;
+	protected double	m_Ask;
+	protected double	m_Bid;
+	protected double	m_Price;
+	protected long		m_Volume;
+	protected long		m_TimeStamp;
+	protected long		m_TimeStampMs;
 	protected VContract m_Contract;
-	protected int m_TickType;
-	protected int m_Type;
+	protected int		m_TickType;
+	protected int		m_Type;
 
 	abstract public Object GetSource();
 
@@ -30,13 +30,13 @@ public abstract class GenQuoteMessage implements IQuoteMessage, Serializable {
 		m_Contract = vc;
 		m_Type = IQuoteMessage.TYPE_TICK;
 
-		if (ts != -1) {
+		if (-1 != ts) {
 			m_TimeStamp = ts;
 		} else {
 			StampTimeStamp();
 		}
 
-		if (ts_ms != -1) {
+		if (-1 != ts_ms) {
 			m_TimeStampMs = ts_ms;
 		} else {
 			StampTimeStampMs();
@@ -57,25 +57,25 @@ public abstract class GenQuoteMessage implements IQuoteMessage, Serializable {
 		m_Contract = vc;
 		m_Type = IQuoteMessage.TYPE_BAR;
 
-		if (ts != -1) {
+		if (-1 != ts) {
 			m_TimeStamp = ts;
 		} else {
 			StampTimeStamp();
 		}
 
-		if (ts_ms != -1) {
+		if (-1 != ts_ms) {
 			m_TimeStampMs = ts_ms;
 		} else {
 			StampTimeStampMs();
 		}
 
-		if (ts != -1) {
+		if (-1 != ts) {
 			m_TimeStamp = ts;
 		} else {
 			StampTimeStamp();
 		}
 
-		if (ts_ms != -1) {
+		if (-1 != ts_ms) {
 			m_TimeStampMs = ts_ms;
 		} else {
 			StampTimeStampMs();

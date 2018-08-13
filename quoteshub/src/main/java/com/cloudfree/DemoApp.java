@@ -27,22 +27,6 @@ public class DemoApp {
 
 	public static void main(String[] args) throws Exception {
 
-		try {
-			InetAddress a1 = InetAddress.getLocalHost();
-			InetAddress a2 = InetAddress.getLocalHost();
-
-			System.out.println(a1.hashCode());
-			System.out.println(a2.hashCode());
-
-			if (a1.equals(a2) && a1.hashCode() == a2.hashCode()) {
-				System.out.println("They are the same!");
-			} else {
-				System.out.println("They are different!");
-			}
-		} catch (UnknownHostException e1) {
-			e1.printStackTrace();
-		}
-
 		logger = new GenLogger(DemoApp.class, GenLogger.INFO);
 
 		Options options = new Options();

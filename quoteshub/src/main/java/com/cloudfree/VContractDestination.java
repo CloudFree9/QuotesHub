@@ -1,6 +1,6 @@
 package com.cloudfree;
 
-public abstract class VContractDestination implements IDestination {
+public abstract class VContractDestination extends IDestination.AbstractDestination {
 	protected VContract m_Contract;
 
 	public VContractDestination SetVContract(VContract c) {

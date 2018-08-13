@@ -13,29 +13,26 @@ public abstract class AbstractQuotesProvider implements Serializable {
 	protected Set<AbstractQuotesSubscriber> m_Subscribers = new HashSet<>();
 
 	abstract public AbstractQuotesProvider Launch();
-
 	abstract public AbstractQuotesProvider Stop();
 
 	public AbstractQuotesSubscriber GetSubscriberByName(String name) {
-		return m_Subscribers.stream().filter(s -> s.GetName().equals(name)).findFirst().orElse(null);
+		return m_Subscribers.stream().filter(s -> s.m_Name
+				.equals(name)).findFirst().orElse(null);
 	}
 
 	public AbstractQuotesProvider AddSubscriber(AbstractQuotesSubscriber s) {
-		if (s != null)
-			m_Subscribers.add(s);
+		if (null != s)	m_Subscribers.add(s);
 		return this;
 	}
 
 	public AbstractQuotesProvider RemoveSubscriber(AbstractQuotesSubscriber s) {
-		if (s != null)
-			m_Subscribers.remove(s);
+		if (null != s)	m_Subscribers.remove(s);
 		return this;
 	}
 
 	public AbstractQuotesProvider RemoveSubscriber(String s) {
 		AbstractQuotesSubscriber sub = GetSubscriberByName(s);
-		if (sub != null)
-			m_Subscribers.remove(sub);
+		if (null != sub) m_Subscribers.remove(sub);
 		return this;
 	}
 

@@ -71,10 +71,10 @@ public class GenLogger implements ILogger {
 
 	public void log(final String str, int l) {
 
-		int oldlevel = level;
-		SetLevel(l);
-		log(str);
-		SetLevel(oldlevel);
+//		int oldlevel = level;
+//		SetLevel(l);
+		if (l >= level)	log(str);
+//		SetLevel(oldlevel);
 
 	}
 }

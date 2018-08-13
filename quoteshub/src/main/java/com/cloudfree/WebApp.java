@@ -6,6 +6,7 @@ import java.io.FileInputStream;
 import java.io.InputStreamReader;
 import java.util.HashMap;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.TimeUnit;
@@ -20,9 +21,13 @@ import org.eclipse.jetty.server.handler.ContextHandler;
 import org.json.simple.JSONArray;
 import org.json.simple.JSONObject;
 import org.json.simple.JSONValue;
+
+import com.cloudfree.IB.IBContract;
 import com.cloudfree.IB.IBQuotesProvider;
 import com.cloudfree.IB.IBQuotesSubscriber;
 import com.cloudfree.web.IBQuotesHandler;
+import com.ib.client.Contract;
+import com.ib.client.ContractDetails;
 import com.ib.controller.ExtController.ICommonHandler;
 
 public class WebApp {
@@ -32,6 +37,7 @@ public class WebApp {
 
 	private static GenQuotesHub hub;
 	public final static Set<Map<String, String>> globalContracts = new HashSet<>();
+	public final Object m_SyncObj = new Object();
 
 	public static CommandLine GetOpitions(String[] args) {
 
@@ -113,8 +119,55 @@ public class WebApp {
 
 		if (cons != null && cons.size() > 0) {
 			for (int conid : cons) {
-				subscriber.Subscribe(ICommonHandler.REALTIMEBAR, conid);
+				Contract con = new Contract();
+				con.conid(conid);
+
+				try {
+					List<ContractDetails> cds = subscriber.GetContractDetails(con);
+					if (null != cds && cds.size() > 0) {
+						con = cds.get(0).contract();
+					}
+				} catch (Exception e) {
+					e.printStackTrace();
+					continue;
+				}
+
+				Contract con1 = con.clone();
+				
+				new Thread() {
+					
+					public void run() {
+						
+						this.setName("VIX enablement for contract " + con1.localSymbol());
+						IBContract ibcon = new IBContract(con1, subscriber);
+
+						while (true) {
+							synchronized(hub) {
+								subscriber.Subscribe(ICommonHandler.REALTIMEBAR, ibcon);
+								try {
+									TimeUnit.SECONDS.sleep(3);
+								} catch (InterruptedException e1) {
+									// TODO Auto-generated catch block
+									e1.printStackTrace();
+								}
+								ibcon.EnableVIX();
+							}
+							
+							try {
+								TimeUnit.MINUTES.sleep(30);
+							} catch (InterruptedException e) {
+								// TODO Auto-generated catch block
+								e.printStackTrace();
+							}
+							
+							ibcon.DisableVIX();
+							subscriber.UnSubscribe(ICommonHandler.REALTIMEBAR, ibcon);
+						}
+					}
+				}.start();
+				
 			}
+/*			
 			new Thread() {
 				@Override
 				public void run() {
@@ -122,6 +175,7 @@ public class WebApp {
 					subscriber.EnableAllVIX();
 				}
 			}.start();
+*/
 		}
 
 		ContextHandler context = new ContextHandler();

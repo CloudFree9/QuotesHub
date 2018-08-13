@@ -131,18 +131,13 @@ public class ContractExplorer {
 		@Override
 		public void tickOptionComputation(TickType tickType, double impliedVol, double delta, double optPrice,
 				double pvDividend, double gamma, double vega, double theta, double undPrice) {
-			// TODO Auto-generated method stub
-
-			// if (tickType == TickType.MODEL_OPTION || tickType == TickType.BID_OPTION ||
-			// tickType == TickType.ASK_OPTION) {
-			System.out.println(String.format("@@@@@@@@@@@@@@@@ Handled contract: %s %f %f %f %f %f %f %f %f", tickType,
+			m_inLogger.log(String.format("@@@@@@@@@@@@@@@@ Handled contract: %s %f %f %f %f %f %f %f %f", tickType,
 					impliedVol, delta, optPrice, pvDividend, gamma, vega, theta, undPrice));
-			System.out.printf(
+			m_inLogger.log(String.format(
 					"@@@@@@@@@@@@@@@@ Contract: %s, ReqId: %d, IV:%f, Delta:%f, optPrice: %f, underPrice: %f\n",
-					con.localSymbol(), m_reqId, impliedVol, delta, optPrice, undPrice);
+					con.localSymbol(), m_reqId, impliedVol, delta, optPrice, undPrice));
 			price = optPrice;
 			underprice = undPrice;
-			// }
 		}
 	}
 
@@ -150,8 +145,6 @@ public class ContractExplorer {
 
 		@Override
 		public void accountList(List<String> arg0) {
-			// TODO Auto-generated method stub
-
 		}
 
 		@Override
@@ -214,31 +207,39 @@ public class ContractExplorer {
 
 		@Override
 		public int GetReqId() {
-			// TODO Auto-generated method stub
 			return 0;
 		}
 
 		@Override
 		public int GetType() {
-			// TODO Auto-generated method stub
 			return 0;
 		}
 
 		@Override
 		public void SetReqId(int reqId) {
-			// TODO Auto-generated method stub
 
 		}
 
 	}
 
-	public void StartExplorer() {
+	public void DisableLog2Screen() {
+		m_inLogger.SetLevel(GenLogger.FATAL);
+		m_outLogger.SetLevel(GenLogger.FATAL);
+	}
+	public void StartExplorer() throws InterruptedException {
 
 		if (m_Controller == null) {
+			DisableLog2Screen();
 			m_Controller = new ExtController(new ConnectionHandler(), m_inLogger, m_outLogger, null);
+			
 		}
 
 		m_Controller.connect(m_TWSHost, m_TWSPort, m_ClientID, m_ConnectOptions);
+		TimeUnit.SECONDS.sleep(3);
+	}
+	
+	public void StopExplorer() {
+		if (null != m_Controller) m_Controller.disconnect();
 	}
 
 	public void GetContracts(Contract con) {
@@ -253,28 +254,27 @@ public class ContractExplorer {
 
 	public static void main(String[] args) throws InterruptedException {
 
-		if (args.length < 2) {
-			System.out.printf("Usage: java %s <Symbol> <SecType> [TWSHost] [TWSPort]\n");
-			System.out.printf("\tExample for mini S&P future: java %s ES FUT");
+		
+		if (args.length < 4) {
+			System.out.printf("Usage: java %s <Symbol> <SecType> <Month> <OPTION_STRIKE> [TWSHost] [TWSPort]\n", ContractExplorer.class.getName());
+			System.out.printf("\tExample for JPY future: java %s JPY FUT 201809 0.009050", ContractExplorer.class.getName());
 			return;
 		}
 
 		ContractExplorer ce = new ContractExplorer();
 
-		if (args.length > 2)
-			ce.SetHost(args[2]);
-		if (args.length > 3)
-			ce.SetPort(Integer.parseInt(args[3]));
+		if (args.length > 4)
+			ce.SetHost(args[4]);
+		if (args.length > 5)
+			ce.SetPort(Integer.parseInt(args[5]));
 
 		Contract con = new Contract();
-		con.symbol("JPY");
-		con.secType(SecType.FUT.name());
+		con.symbol(args[0]);
+		con.secType(args[1]);
 		con.currency("USD");
-		con.lastTradeDateOrContractMonth("201809");
+		con.lastTradeDateOrContractMonth(args[2]);
 
 		ce.StartExplorer();
-
-		int i = 0;
 
 		List<ContractDetails> cds;
 		Set<Integer> ids = new HashSet<Integer>();
@@ -321,7 +321,7 @@ public class ContractExplorer {
 		con.secType(SecType.FOP.name());
 		con.currency("USD");
 		con.right("C");
-		con.strike(0.009050);
+		con.strike(Double.parseDouble(args[3]));
 
 		ContractDetails cd1;
 
@@ -334,13 +334,36 @@ public class ContractExplorer {
 		}
 
 		if (cds == null || cds.size() == 0) {
-			System.out.printf("Nothing got, exit!\n");
+			System.out.printf("Nothing got for the optin contracts for the main contract, exit!\n");
 			System.exit(1);
 		}
 
+		System.out.printf("There are %d option contracts for the contract query!\n", cds.size());
+
+		cds.stream().filter(e -> (e.underConid() == pcid))
+		.forEach(cd -> {
+			System.out.printf("************* %s *************\n", cd.contract().symbol());
+			System.out.printf("\tID : %d \n", cd.contract().conid());
+			System.out.printf("\tSymbol : %s \n", cd.contract().symbol());
+			System.out.printf("\tLocal Symbol : %s \n", cd.contract().localSymbol());
+			System.out.printf("\tDescription : %s \n", cd.contract().description());
+			System.out.printf("\tMarket Name : %s \n", cd.marketName());
+			System.out.printf("\tLast Trade : %s \n", cd.contract().lastTradeDateOrContractMonth());
+			System.out.printf("\tTrading Class : %s \n", cd.contract().tradingClass());
+			System.out.printf("\tCurrency : %s \n", cd.contract().currency());
+			System.out.printf("\tMultiplier : %s \n", cd.contract().multiplier());
+			System.out.printf("\tUnder : %s \n", cd.underSymbol());
+			System.out.printf("\tUnder id : %s \n", cd.underConid());
+			System.out.printf("\tContract Month : %s \n", cd.contractMonth());
+			System.out.println();
+			
+
+		});
+		
 		cd1 = cds.get(0);
 
 		ids.add(cd1.conid());
+/*
 		System.out.printf("************* Primary Monthly Option Contract %s *************\n", cd1.contract().symbol());
 		System.out.printf("\tID : %d \n", cd1.contract().conid());
 		System.out.printf("\tSymbol : %s \n", cd1.contract().symbol());
@@ -357,7 +380,6 @@ public class ContractExplorer {
 		System.out.println();
 
 		TimeUnit.SECONDS.sleep(2);
-
 		tradingcls = cd1.contract().tradingClass();
 		final String tcls = tradingcls;
 
@@ -403,7 +425,8 @@ public class ContractExplorer {
 					});
 
 		}
-
+*/
 		System.out.println("That's it, bye!");
+		ce.StopExplorer();
 	}
 }

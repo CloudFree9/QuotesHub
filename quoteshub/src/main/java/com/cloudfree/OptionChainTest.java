@@ -22,7 +22,7 @@ public class OptionChainTest {
 
 	public static void main(String[] args) throws Exception {
 
-		logger = new GenLogger(DemoApp.class, GenLogger.INFO);
+		logger = new GenLogger(OptionChainTest.class, GenLogger.INFO);
 
 		Options options = new Options();
 		CommandLine cmd = null;
@@ -57,13 +57,10 @@ public class OptionChainTest {
 
 		GenHub.Start();
 
-		// Thread.sleep(3000);
 		Contract con = new Contract();
-		// con.secId("324448118");
 		con.symbol("JPY");
 		con.currency("USD");
 		con.secType("FUT");
-		// con.secType("FOP");
 		con.exchange("GLOBEX");
 		con.lastTradeDateOrContractMonth("201809");
 
@@ -79,7 +76,7 @@ public class OptionChainTest {
 		IBContract ibcon = new IBContract(con, s);
 
 		s.Subscribe(ICommonHandler.REALTIMEBAR, ibcon);
-		s.Subscribe(ICommonHandler.REALTIMETICK, ibcon);
+//		s.Subscribe(ICommonHandler.REALTIMETICK, ibcon);
 
 		s.EnableVIX(ibcon);
 

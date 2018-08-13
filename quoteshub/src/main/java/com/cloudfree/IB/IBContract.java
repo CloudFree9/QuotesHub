@@ -22,7 +22,7 @@ public class IBContract extends VContract {
 	protected final IBQuotesSubscriber m_Subscriber;
 	private boolean m_Started = false;
 	private boolean m_VIXEnabled = false;
-	private double m_VIX = 0;
+	private Double m_VIX = 0.0;
 	private boolean m_PriceChanged = false;
 	private double m_UpStrike = Double.MAX_VALUE;
 	private double m_BotStrike = -1;
@@ -54,7 +54,7 @@ public class IBContract extends VContract {
 		return m_Started;
 	}
 
-	public synchronized double GetVIX() {
+	public synchronized Double GetVIX() {
 		return m_VIX;
 	}
 

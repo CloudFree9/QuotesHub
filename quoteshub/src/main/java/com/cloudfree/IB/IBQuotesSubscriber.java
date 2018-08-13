@@ -8,7 +8,10 @@ import com.cloudfree.VContract;
 import com.ib.client.Contract;
 import com.ib.client.ContractDetails;
 import com.ib.controller.ExtController.ICommonHandler;
-import com.ib.controller.ExtController.IConnectionHandler;
+
+/*
+ * Class for IB as a quotes provider
+ */
 
 public class IBQuotesSubscriber extends AbstractQuotesSubscriber {
 
@@ -18,9 +21,13 @@ public class IBQuotesSubscriber extends AbstractQuotesSubscriber {
 		super(n, p);
 	}
 
+	/*
+	 * Given an IB Contract, get the ContractDetails list corresponding to the contract
+	 */
+	
 	public List<ContractDetails> GetContractDetails(Contract con) throws Exception {
 
-		if (con == null) {
+		if (null == con) {
 			throw new Exception("Null contract passed to IBQuotesSubscriber::GetContractDetails()");
 		}
 
@@ -42,61 +49,17 @@ public class IBQuotesSubscriber extends AbstractQuotesSubscriber {
 			}
 
 			i++;
-			if (res != null)
-				break;
+			
+			if (null != res) break;
 		}
 
 		return res;
 	}
 
-	public ContractDetails GetOneContractDetails(Contract con) throws Exception {
-
-		if (con == null) {
-			throw new Exception("Null contract passed to IBQuotesSubscriber::GetOneContractDetails()");
-		}
-
-		List<ContractDetails> res = null;
-		int i = 0;
-
-		EWrapperHandlers.ContractDetailsHandler handler = EWrapperHandlers.ContractDetailsHandler.GetInstance();
-
-		while (i < 3) {
-			try {
-				synchronized (handler.m_SyncObj) {
-					((IBQuotesProvider) GetProvider()).controller().reqContractDetails(con, handler);
-					handler.m_SyncObj.wait();
-					res = handler.GetContractDetailsList();
-				}
-
-			} catch (Exception e) {
-				e.printStackTrace();
-			}
-
-			i++;
-			if (res != null)
-				break;
-		}
-
-		return res.size() == 1 ? res.get(0) : null;
-	}
-
-	public ContractDetails GetOneContractDetails(int conid) throws Exception {
-
-		if (conid <= 0) {
-			throw new Exception("Zero passed to IBQuotesSubscriber::GetOneContractDetails(int)");
-		}
-
-		Contract con = new Contract();
-		con.conid(conid);
-
-		return GetOneContractDetails(con);
-	}
-
 	@Override
 	public IBQuotesSubscriber Subscribe(int type, VContract c) {
 
-		if (c == null)
-			return this;
+		if (null == c)	return this;
 
 		IBContract con = (IBContract) c;
 
@@ -121,11 +84,10 @@ public class IBQuotesSubscriber extends AbstractQuotesSubscriber {
 
 		try {
 			List<ContractDetails> cds = GetContractDetails(con);
-			if (cds != null && cds.size() > 0) {
+			if (null != cds && cds.size() > 0) {
 				con = cds.get(0).contract();
 			}
 		} catch (Exception e) {
-			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
 
@@ -136,8 +98,7 @@ public class IBQuotesSubscriber extends AbstractQuotesSubscriber {
 	@Override
 	public IBQuotesSubscriber UnSubscribe(int type, VContract c) {
 
-		if (c == null)
-			return this;
+		if (null == c)	return this;
 
 		IBContract con = (IBContract) c;
 
@@ -169,7 +130,7 @@ public class IBQuotesSubscriber extends AbstractQuotesSubscriber {
 
 	@Override
 	public IBQuotesSubscriber DisableVIX(VContract vc) {
-		if (vc == null || (!m_RTBarVContracts.contains(vc) && !m_RTTickVContracts.contains(vc)
+		if (null == vc || (!m_RTBarVContracts.contains(vc) && !m_RTTickVContracts.contains(vc)
 				&& !m_HistBarVContracts.contains(vc)))
 			return this;
 
@@ -179,7 +140,6 @@ public class IBQuotesSubscriber extends AbstractQuotesSubscriber {
 
 	public IBQuotesSubscriber EnableAllVIX() {
 		Stream.of(m_RTBarVContracts, m_RTTickVContracts).flatMap(e -> e.stream()).distinct().forEach(vc -> {
-			System.out.printf("vc : %s\n", vc.toString());
 			EnableVIX(vc);
 		});
 		return this;
@@ -194,7 +154,6 @@ public class IBQuotesSubscriber extends AbstractQuotesSubscriber {
 
 	public void Refresh() {
 		Stream.of(m_RTBarVContracts, m_RTTickVContracts).flatMap(e -> e.stream()).distinct().forEach(vc -> {
-			System.out.printf("vc : %s re-subscribe\n", vc.toString());
 			UnSubscribe(ICommonHandler.REALTIMETICK, vc);
 			Subscribe(ICommonHandler.REALTIMETICK, vc);
 			IBContract ibcon = (IBContract) vc;

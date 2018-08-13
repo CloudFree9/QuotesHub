@@ -22,7 +22,7 @@ public interface IDestination {
 
 			Put(msg);
 
-			if (m_Next != null)
+			if (null != m_Next)
 				m_Next.PutMessage(msg);
 		}
 	}

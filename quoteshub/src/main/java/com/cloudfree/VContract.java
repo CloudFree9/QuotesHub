@@ -32,7 +32,7 @@ public abstract class VContract implements Serializable {
 	@Override
 	public boolean equals(Object a1) {
 
-		if (a1 == null || a1.getClass() != this.getClass())
+		if (null == a1 || a1.getClass() != this.getClass())
 			return false;
 		if (this == a1)
 			return true;
