@@ -145,6 +145,12 @@ public class IBQuotesHandler extends GenericQuotesHandler {
 
 		IBQuotesSubscriber s = (IBQuotesSubscriber) m_ActiveSubscriber;
 
+		if(m_ActiveSubscriber.IsWeekend()) {
+			out.printf("{\"res\":\"error\", \"reason\": \"instrument %s is not in trading hours\"}", instrument);
+			baseRequest.setHandled(true);
+			return;
+		}
+		
 		Map<String, String> conMap = WebApp.globalContracts.stream().filter(e -> e.get("ContractID").equals(instrument))
 				.findFirst().orElse(null);
 
@@ -167,8 +173,9 @@ public class IBQuotesHandler extends GenericQuotesHandler {
 			ibcon = s.FindIBContractByID(Integer.parseInt(id));
 		}
 
-		if (ibcon == null) {
-			out.printf("{\"res\":\"error\", \"reason\": \"unknown instrument\"}");
+		if (ibcon == null || ibcon.InOffTime()) {
+//		if (ibcon == null) {
+			out.printf("{\"res\":\"error\", \"reason\": \"unknown instrument or not in trading hours\"}");
 			return;
 		}
 

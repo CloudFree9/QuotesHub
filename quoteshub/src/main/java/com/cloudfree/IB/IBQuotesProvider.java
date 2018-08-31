@@ -6,6 +6,7 @@ import org.apache.commons.configuration2.builder.fluent.Configurations;
 import org.apache.commons.configuration2.ex.ConfigurationException;
 import com.cloudfree.AbstractQuotesProvider;
 import com.cloudfree.GenLogger;
+import com.cloudfree.MongoQuotesStore;
 import com.cloudfree.IB.EWrapperHandlers.ConnectionHandler;
 import com.ib.controller.ExtController;
 
@@ -25,6 +26,8 @@ public class IBQuotesProvider extends AbstractQuotesProvider implements Runnable
 	public	final Object m_DisconnectedSignal = new Object();
 	public	Boolean m_RestartSignal = new Boolean(false);
 	private	ConnectionHandler m_ConnectionHandler = EWrapperHandlers.ConnectionHandler.GetInstance(this);
+	private int m_VixServePerSubs = 30;
+	private int m_VixServePerSession = 300;
 	
 	public	IBQuotesProvider(String name, String configfile) {
 
@@ -35,6 +38,14 @@ public class IBQuotesProvider extends AbstractQuotesProvider implements Runnable
 			m_TWSPort			= m_Configurations.getInt("tws.port", m_TWSPort);
 			m_ClientID			= m_Configurations.getInt("tws.clientid", m_ClientID);
 			m_ConnectOptions	= m_Configurations.getString("tws.connect_opts", m_ConnectOptions);
+			
+			String dbhost		= m_Configurations.getString("db.host", "");
+			int port			= m_Configurations.getInt("db.port", 27017);
+			String dbname		= m_Configurations.getString("db.database", "quotesdb");
+			m_VixServePerSubs	= m_Configurations.getInt("vix_serve_per_subscription", m_VixServePerSubs);
+			m_VixServePerSession	= m_Configurations.getInt("max_vix_serve_per_instance", m_VixServePerSession);
+			
+			m_Persistence		= new MongoQuotesStore(dbhost, port, dbname);
 
 		} catch (ConfigurationException e) {
 			m_inLogger.log("errors on loading TWS configuration.");
@@ -55,6 +66,7 @@ public class IBQuotesProvider extends AbstractQuotesProvider implements Runnable
 		m_outLogger.log(String.format("TWS Port: %d", m_TWSPort));
 		m_outLogger.log(String.format("TWS ClientID: %d", m_ClientID));
 		m_outLogger.log(String.format("TWS extra options: %s", m_ConnectOptions));
+		m_outLogger.log(String.format("MongoDB: %s", m_Persistence.GetDBConfig()));
 	}
 
 	public ExtController controller() {
@@ -80,6 +92,14 @@ public class IBQuotesProvider extends AbstractQuotesProvider implements Runnable
 		return this;
 	}
 
+	public int GetVixServePerSubs() {
+		return m_VixServePerSubs;
+	}
+	
+	public int GetVixServePerSession() {
+		return m_VixServePerSession;
+	}
+	
 	public void Refresh() {
 		m_Subscribers.forEach(e -> {
 			((IBQuotesSubscriber) e).Refresh();
@@ -90,6 +110,12 @@ public class IBQuotesProvider extends AbstractQuotesProvider implements Runnable
 	public void run() {
 		synchronized (m_ConnectedSignal) {
 			controller().connect(m_TWSHost, m_TWSPort, m_ClientID, m_ConnectOptions);
+		}
+		
+		try {
+			m_Persistence.Connect();
+		} catch (Exception e) {
+			e.printStackTrace();
 		}
 	}
 

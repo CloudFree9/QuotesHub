@@ -9,6 +9,7 @@ public abstract class AbstractQuotesProvider implements Serializable {
 	private static final long serialVersionUID = 3352443003188468565L;
 	protected IQuotesHub m_QHub;
 	protected String m_Name;
+	protected IMongoPersistence m_Persistence;
 
 	protected Set<AbstractQuotesSubscriber> m_Subscribers = new HashSet<>();
 
@@ -36,6 +37,10 @@ public abstract class AbstractQuotesProvider implements Serializable {
 		return this;
 	}
 
+	public IMongoPersistence GetPersistenceStore() {
+		return m_Persistence;
+	}
+	
 	public String GetName() {
 		return m_Name;
 	}

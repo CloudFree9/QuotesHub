@@ -91,7 +91,13 @@ public class IBQuotesSubscriber extends AbstractQuotesSubscriber {
 			e.printStackTrace();
 		}
 
-		IBContract ibcon = new IBContract(con, this);
+		IBContract ibcon = null;
+		try {
+			ibcon = new IBContract(con, this);
+		} catch (Exception e) {
+			e.printStackTrace();
+		}
+		
 		return Subscribe(type, ibcon);
 	}
 
@@ -160,5 +166,23 @@ public class IBQuotesSubscriber extends AbstractQuotesSubscriber {
 			ibcon.GetOptionChain().GetOptionMap().Refresh();
 		});
 
+	}
+
+	@Override
+	public boolean AllInstrumentsOffTime() {
+		boolean ret = true;
+		
+		ret = Stream.of(m_RTBarVContracts, m_RTTickVContracts).flatMap(e -> e.stream()).distinct()
+			.allMatch(e -> {
+				boolean yn = false;
+				try {
+					yn = e.InOffTime();
+				} catch (Exception e1) {
+					e1.printStackTrace();
+				}
+				
+				return yn;
+			});
+		return ret;
 	}
 }

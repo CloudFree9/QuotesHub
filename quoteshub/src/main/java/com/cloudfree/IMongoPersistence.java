@@ -10,7 +10,7 @@ public interface IMongoPersistence {
 
 	IMongoPersistence Connect() throws Exception;
 	void Disconnect();
-	IMongoPersistence Put(String collection, Document d);
-	Collection<Document> Get(String collection, Bson query);
-	
+	IMongoPersistence Put(String collection, Document d) throws Exception;
+	Collection<Document> Get(String collection, Bson query) throws Exception;
+	String GetDBConfig();
 }

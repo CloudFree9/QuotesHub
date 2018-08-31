@@ -1,12 +1,19 @@
 package com.cloudfree.IB;
 
 import java.text.SimpleDateFormat;
+import java.util.Calendar;
 import java.util.Date;
+import java.util.Deque;
 import java.util.List;
 import java.util.Queue;
+import java.util.TimeZone;
+
+import org.bson.Document;
 
 import com.cloudfree.GenLogger;
+import com.cloudfree.MongoQuotesStore;
 import com.cloudfree.IB.OptionChain.OptContract;
+import com.cloudfree.IB.OptionChain.OptionMap;
 import com.ib.client.ContractDetails;
 import com.ib.client.TickAttr;
 import com.ib.client.TickType;
@@ -22,11 +29,13 @@ public class EWrapperHandlers {
 		public TickType tickType;
 		public double price;
 		public TickAttr attribs;
+		public long time;
 
-		public Tick(TickType type, double p, TickAttr attr) {
+		public Tick(TickType type, double p, TickAttr attr, long ts) {
 			tickType = type;
 			price = p;
 			attribs = attr;
+			time = ts;
 		}
 	}
 
@@ -203,39 +212,46 @@ public class EWrapperHandlers {
 		public void realtimeBar(Bar bar) {
 
 			synchronized (m_Syncobj) {
-				System.out.printf("reqId %d\n", m_reqId);
-				System.out.printf("Bar | time:%s, open:%f, high:%f, low:%f, close:%f, volume:%d\n", bar.formattedTime(),
-						bar.open(), bar.high(), bar.low(), bar.close(), bar.volume());
+				System.out.printf("Bar of %s | time:%s, open:%f, high:%f, low:%f, close:%f, volume:%d\n", 
+						m_VContract.m_RealContract.localSymbol(), 
+						bar.formattedTime(),
+						bar.open(), 
+						bar.high(), 
+						bar.low(), 
+						bar.close(), 
+						bar.volume());
 
 				m_Bar = bar;
+				double orig_price = m_VContract.m_RecentPrice;
+				
+				m_VContract.PutBar(REALTIMEBAR, bar);
+		        MongoQuotesStore IBQuotesdb = (MongoQuotesStore)(m_VContract.GetSubscriber().GetProvider()).GetPersistenceStore();
 
-				Queue<Bar> q = m_VContract.GetRealTimeBarsQueue();
+		        String collection = String.format("%s_%s_%d_%s", 
+		        		m_VContract.m_RealContract.symbol(),
+		        		m_VContract.m_RealContract.lastTradeDateOrContractMonth(),
+		        		m_VContract.m_RealContract.conid(),
+		        		m_VContract.m_RealContract.getSecType()
+		        		);
+		        
+		        try {
+					IBQuotesdb.Put(collection, new Document()
+							.append("ts", bar.time() * 1000)
+							.append("price", bar.close()));
+				} catch (Exception e) {
+					e.printStackTrace();
+				}
+		        
 				synchronized (m_VContract) {
 					m_VContract.SetPrice(bar.close());
 				}
 
-				synchronized (q) {
-					q.add(bar);
-					if (q.size() > 1000)
-						q.remove(); // Keep the unhandled bars limited to 1000
-				}
-
-				synchronized (m_VContract.m_PriceSync) {
-					m_VContract.m_PriceSync.notifyAll();
-				}
-
-				synchronized (m_VContract.m_WatchSync) {
-					m_VContract.m_WatchSync.notifyAll();
-				}
-
-				if (m_VContract instanceof OptContract) {
-					System.out.printf("### Contract: %s, price: %f ### \n", m_VContract.GetRealContract().localSymbol(),
-							m_VContract.GetPrice());
-					Object syncobj = ((OptContract) m_VContract).GetUnderContract().m_OptPriceSync;
-
-					synchronized (syncobj) {
-						syncobj.notifyAll();
+				if (bar.close() != orig_price) {
+	
+					synchronized (m_VContract.m_WatchSync) {
+						m_VContract.m_WatchSync.notifyAll();
 					}
+
 				}
 
 				m_Count++;
@@ -262,6 +278,72 @@ public class EWrapperHandlers {
 
 	}
 
+	public static class RTBarOptHandler extends RealTimeBarHandler {
+		
+		private RTTickOptHandler m_VolComputer = null; 
+		private double m_UndPrice = 0.0;
+		
+		public static RTBarOptHandler GetRTBarOptHandler(OptionChain.OptContract c) {
+
+			RTBarOptHandler inst = null;
+			try {
+				inst = new RTBarOptHandler(c);
+			} catch (Exception e) {
+				// TODO Auto-generated catch block
+				e.printStackTrace();
+			}
+
+			return inst;
+		}
+
+		private RTBarOptHandler(OptionChain.OptContract c) throws Exception {
+			super(c);
+			m_VolComputer = RTTickOptHandler.GetRTOptHandler(c);
+		}
+		
+		public RTTickOptHandler GetVolComputer() {
+			return m_VolComputer;
+		}
+		
+		@Override
+		public void realtimeBar(Bar bar) {
+
+			synchronized (m_Syncobj) {
+				System.out.printf("Option Bar %s | time:%s, open:%f, high:%f, low:%f, close:%f, volume:%d\n", m_VContract.GetRealContract().localSymbol(), bar.formattedTime(),
+						bar.open(), bar.high(), bar.low(), bar.close(), bar.volume());
+
+/*				
+		        MongoQuotesStore IBQuotesdb = (MongoQuotesStore)(m_VContract.GetSubscriber().GetProvider()).GetPersistenceStore();
+
+		        try {
+					IBQuotesdb.Put("InstrumentBar", new Document()
+							.append("contractid", m_VContract.GetRealContract().conid())
+							.append("instrument", m_VContract.GetRealContract().symbol() + " " + m_VContract.GetRealContract().lastTradeDateOrContractMonth())
+							.append("timestamp", bar.time() * 1000)
+							.append("type", m_VContract.GetRealContract().getSecType())
+							.append("price", bar.close()));
+				} catch (Exception e) {
+					e.printStackTrace();
+				}
+*/		        
+				OptionChain.OptContract optCon = (OptionChain.OptContract) m_VContract;
+				double undprice = optCon.GetUnderContract().GetPrice();
+
+				if (bar.close() != m_VContract.m_RecentPrice || m_UndPrice != undprice) {
+
+					synchronized (m_VContract) {
+						m_VContract.SetPrice(bar.close());
+					}
+
+					optCon.RequestOptionVolatility(optCon, m_VContract.m_RecentPrice, undprice, m_VolComputer);
+					m_UndPrice = undprice;
+					m_Syncobj.notifyAll();
+				}
+
+			}
+		}
+	}
+	
 	public static class HistoricalDataHandler implements ExtController.IHistoricalDataHandler {
 
 		public final Object m_Syncobj = new Object();
@@ -347,7 +429,20 @@ public class EWrapperHandlers {
 				// System.out.printf("Bar | time:%s, open:%f, high:%f, low:%f, close:%f,
 				// volume:%d\n", bar.formattedTime(), bar.open(), bar.high(), bar.low(),
 				// bar.close(), bar.volume());
-				Queue<Bar> q = m_VContract.GetHistBarsQueue();
+		        MongoQuotesStore IBQuotesdb = (MongoQuotesStore)(m_VContract.GetSubscriber().GetProvider()).GetPersistenceStore();
+
+		        try {
+					IBQuotesdb.Put("InstrumentBar", new Document()
+							.append("contractid", m_VContract.GetRealContract().conid())
+							.append("instrument", m_VContract.GetRealContract().symbol() + " " + m_VContract.GetRealContract().lastTradeDateOrContractMonth())
+							.append("timestamp", bar.time() * 1000)
+							.append("type", m_VContract.GetRealContract().getSecType())
+							.append("price", bar.close()));
+				} catch (Exception e) {
+					e.printStackTrace();
+				}
+
+		        Queue<Bar> q = m_VContract.GetHistBarsQueue();
 				synchronized (q) {
 					q.add(bar);
 					if (q.size() > 1000)
@@ -506,41 +601,82 @@ public class EWrapperHandlers {
 			switch (tickType) {
 
 			case BID:
+//			case BID_OPTION:
 				System.out.printf("Bid: %f\n", price);
+				if (price == m_VContract.m_RecentBid) return;
 				m_VContract.Bid(price);
 				break;
 			case ASK:
+//			case ASK_OPTION:
 				System.out.printf("Ask: %f\n", price);
+				if (price == m_VContract.m_RecentAsk) return;
 				m_VContract.Ask(price);
 				break;
 			case LAST:
+//			case LAST_OPTION:
 			case CLOSE:
 				System.out.printf("Last: %f\n", price);
+				m_VContract.SetPrice(price);
 				break;
 			default:
 				System.out.printf("Others Tick: Type - %s, Price: %f, ignored\n", tickType.name(), price);
 				return;
 			}
 
-			if (m_VContract.m_RecentBid > 0 && m_VContract.m_RecentAsk > 0
-					&& (m_VContract.m_RecentPrice < m_VContract.m_RecentBid
-							|| m_VContract.m_RecentPrice > m_VContract.m_RecentAsk)) {
-				price = (m_VContract.m_RecentBid + m_VContract.m_RecentAsk) / 2;
-			}
-
-			if (price == m_VContract.m_RecentPrice) {
+			if (m_VContract.m_RecentBid <= m_VContract.m_RecentPrice && m_VContract.m_RecentAsk >= m_VContract.m_RecentPrice
+					&& (tickType == com.ib.client.TickType.BID || tickType == com.ib.client.TickType.ASK)) {
 				return;
 			}
 
-			m_VContract.SetPrice(price);
+			if (m_VContract.m_RecentBid > m_VContract.m_RecentPrice || m_VContract.m_RecentAsk < m_VContract.m_RecentPrice) {
+				if (tickType == com.ib.client.TickType.LAST || tickType == com.ib.client.TickType.CLOSE) {
+					if (m_VContract.m_RecentBid > m_VContract.m_RecentPrice)  
+						m_VContract.m_RecentBid = m_VContract.m_RecentPrice;
+					
+					if (m_VContract.m_RecentAsk < m_VContract.m_RecentPrice)  
+						m_VContract.m_RecentAsk = m_VContract.m_RecentPrice;
+				} else {
+					m_VContract.m_RecentPrice = (m_VContract.m_RecentAsk + m_VContract.m_RecentBid) / 2;
+				}
+			}
 
 			OptContract optCon = (OptContract) m_VContract;
 			double undprice = optCon.GetUnderContract().GetPrice();
 
-			if (undprice <= 0)
+	        MongoQuotesStore IBQuotesdb = (MongoQuotesStore)(m_VContract.GetSubscriber().GetProvider()).GetPersistenceStore();
+
+	        long ts = Calendar.getInstance(TimeZone.getTimeZone("US/Eastern")).getTimeInMillis();
+	        
+	        try {
+	        	String cat = "";
+	        	if (optCon.GetUnderContract().GetOptionChain().GetOptionMap().GetVIXWatchList(OptionMap.LOWER).contains(optCon)) {
+	        		cat = "F";
+	        	} else if (optCon.GetUnderContract().GetOptionChain().GetOptionMap().GetVIXWatchList(OptionMap.UPPER).contains(optCon)) {
+	        		cat = "H";
+	        	}
+	        	
+	        	String collection = String.format("VIXTick_%s_%s_%d",
+	        			optCon.GetUnderContract().GetRealContract().symbol(),
+	        			optCon.GetUnderContract().GetRealContract().lastTradeDateOrContractMonth(),
+	        			optCon.GetUnderContract().GetRealContract().conid()
+	        	);
+	        	
+	        	if (cat != "")
+					IBQuotesdb.Put(collection, new Document()
+							.append("ts", ts)
+							.append("cat", cat)
+							.append("type", tickType.toString())
+							.append("price", price));
+	        	else
+	        		System.out.printf("Oops, invalid HEAD/FOOT option contract %d\n", optCon.m_ConDetails.conid());
+			} catch (Exception e) {
+				e.printStackTrace();
+			}
+
+	        if (undprice <= 0)
 				return;
 
-			optCon.RequestOptionVolatility(optCon, price, undprice, this);
+//			optCon.RequestOptionVolatility(optCon, m_VContract.m_RecentPrice, undprice, this);
 
 		}
 
@@ -548,19 +684,46 @@ public class EWrapperHandlers {
 		public void tickOptionComputation(TickType tickType, double impliedVol, double delta, double optPrice,
 				double pvDividend, double gamma, double vega, double theta, double undPrice) {
 
+			if (optPrice > undPrice ||  tickType != TickType.MODEL_OPTION)
+				return;
+
 			System.out.printf("@@@@@@ Contract: %s, Type: %s, IV:%f, Delta:%f, optPrice: %f, underPrice: %f\n",
 					m_VContract.GetRealContract().localSymbol(), tickType, impliedVol, delta, optPrice, undPrice);
 
-			if (tickType != TickType.CUST_OPTION_COMPUTATION)
+			switch (tickType) {
+
+//			case CUST_OPTION_COMPUTATION:
+			case MODEL_OPTION:
+
+				OptionChain.OptContract optcon = (OptionChain.OptContract) m_VContract;
+				optcon.Volatility(impliedVol);
+				optcon.Delta(delta);
+				optcon.Gamma(gamma);
+				optcon.Vega(vega);
+				optcon.Theta(theta);
+				break;
+			case BID_OPTION:
+				System.out.printf("Bid: %f\n", optPrice);
+				if (optPrice == m_VContract.m_RecentBid) return;
+				tickPrice(TickType.BID, optPrice, null);
+				break;
+			case ASK_OPTION:
+				System.out.printf("Ask: %f\n", optPrice);
+				if (optPrice == m_VContract.m_RecentAsk) return;
+				tickPrice(TickType.ASK, optPrice, null);
+				break;
+			case LAST_OPTION:
+				System.out.printf("LAST: %f\n", optPrice);
+				if (optPrice == m_VContract.m_RecentAsk) return;
+				tickPrice(TickType.LAST, optPrice, null);
+				break;
+			default:
+				System.out.printf("Others Tick: Type - %s, Price: %f, ignored\n", tickType.name(), optPrice);
 				return;
-
-			OptionChain.OptContract optcon = (OptionChain.OptContract) m_VContract;
-			optcon.Volatility(impliedVol);
-			optcon.Delta(delta);
-			optcon.Gamma(gamma);
-			optcon.Vega(vega);
-			optcon.Theta(theta);
-
+			}
+	//		if (tickType != TickType.CUST_OPTION_COMPUTATION)
+	//			tickPrice(tickType, optPrice, null);
+			// Here need to notify VIX calculation and put the calc result as the recent tick of VIX to the VIX queue
 		}
 
 	}
@@ -585,41 +748,71 @@ public class EWrapperHandlers {
 			switch (tickType) {
 
 			case BID:
-				System.out.printf("Bid: %f\n", price);
+//				System.out.printf("Bid: %f\n", price);
+				if (price == m_VContract.m_RecentBid) return;
 				m_VContract.Bid(price);
+				if(price > m_VContract.m_RecentAsk) {
+					m_VContract.Ask(price);
+				}
 				break;
 			case ASK:
-				System.out.printf("Ask: %f\n", price);
+//				System.out.printf("Ask: %f\n", price);
+				if (price == m_VContract.m_RecentAsk) return;
 				m_VContract.Ask(price);
+				if(price < m_VContract.m_RecentBid) {
+					m_VContract.Bid(price);
+				}
 				break;
 			case LAST:
 			case CLOSE:
 				System.out.printf("Last: %f\n", price);
-
-				Queue<Tick> q = m_VContract.GetRealTimeTickQueue();
-
-				synchronized (q) {
-					q.add(new Tick(tickType, price, attribs));
-					if (q.size() > 1000)
-						q.remove(); // Keep the unhandled bars limited to 1000
-				}
+				if (price == m_VContract.m_RecentPrice) return;
 				break;
 			default:
 				System.out.printf("Others Tick: Type - %s, Price: %f, ignored\n", tickType.name(), price);
 				return;
 			}
 
-			if (m_VContract.m_RecentBid > 0 && m_VContract.m_RecentAsk > 0
-					&& (m_VContract.m_RecentPrice < m_VContract.m_RecentBid
-							|| m_VContract.m_RecentPrice > m_VContract.m_RecentAsk)) {
-				price = (m_VContract.m_RecentBid + m_VContract.m_RecentAsk) / 2;
+	        MongoQuotesStore IBQuotesdb = (MongoQuotesStore)(m_VContract.GetSubscriber().GetProvider()).GetPersistenceStore();
+
+	        long ts = Calendar.getInstance(TimeZone.getTimeZone("US/Eastern")).getTimeInMillis();
+	        
+	        try {
+	        	
+				IBQuotesdb.Put("InstrumentTick", new Document()
+						.append("contractid", m_VContract.GetRealContract().conid())
+						.append("instrument", m_VContract.GetRealContract().localSymbol() + " " + m_VContract.GetRealContract().lastTradeDateOrContractMonth())
+						.append("timestamp", ts)
+						.append("ticktype", tickType.toString())
+						.append("price", price));
+			} catch (Exception e) {
+				e.printStackTrace();
 			}
 
-			if (price == m_VContract.m_RecentPrice) {
-				return;
+	        double c_price = m_VContract.m_RecentPrice;
+			
+			if ((tickType == com.ib.client.TickType.BID || tickType == com.ib.client.TickType.ASK) &&  (c_price < m_VContract.m_RecentBid || c_price > m_VContract.m_RecentAsk)) {
+				c_price = (m_VContract.m_RecentBid + m_VContract.m_RecentAsk) / 2;
 			}
+			
+			if (tickType == com.ib.client.TickType.LAST || tickType == com.ib.client.TickType.CLOSE) {
+				c_price = price;
+				if (c_price > m_VContract.m_RecentAsk) {
+					m_VContract.m_RecentAsk = c_price;
+				}
+				if (c_price < m_VContract.m_RecentBid) {
+					m_VContract.m_RecentBid = c_price;
+				}
+			}
+			
+//			if(m_VContract.m_RecentBid <0 || m_VContract.m_RecentAsk <0 || price <0) {
+//				System.out.printf("Warn : negative tick price got: %f, ticktype: %s\n", price, tickType.toString());
+//				return;
+//			}
+			
+			m_VContract.SetPrice(c_price);
 
-			m_VContract.SetPrice(price);
+			m_VContract.PutTick(REALTIMETICK, new Tick(tickType, c_price, attribs, Calendar.getInstance().get(Calendar.MILLISECOND)));
 
 			synchronized (m_VContract.m_PriceSync) {
 				m_VContract.m_PriceSync.notifyAll();

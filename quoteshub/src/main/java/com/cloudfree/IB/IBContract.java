@@ -1,29 +1,44 @@
 package com.cloudfree.IB;
 
 import java.text.SimpleDateFormat;
+import java.util.Calendar;
 import java.util.Date;
+import java.util.Deque;
+import java.util.HashMap;
 import java.util.LinkedList;
+import java.util.Map;
 import java.util.Queue;
+import java.util.Set;
+import java.util.TimeZone;
+import java.util.stream.Collectors;
+
 import com.cloudfree.VContract;
 import com.cloudfree.IB.EWrapperHandlers.HistoricalDataHandler;
 import com.cloudfree.IB.EWrapperHandlers.RealTimeBarHandler;
 import com.cloudfree.IB.EWrapperHandlers.RealTimeTickDataHandler;
 import com.cloudfree.IB.EWrapperHandlers.Tick;
+import com.cloudfree.IB.OptionChain.OptContract;
+import com.cloudfree.IB.OptionChain.OptionMap;
 import com.ib.client.Contract;
+import com.ib.client.ContractDetails;
 import com.ib.client.Types.WhatToShow;
 import com.ib.controller.Bar;
 import com.ib.controller.ExtController.ICommonHandler;
 
 public class IBContract extends VContract {
 
+	public class VIXTuple {
+		public long m_TimeStamp = 0;
+		public double m_VIX = 0.0;
+	}
+	
 	private static final long serialVersionUID = 8815420348891363024L;
 	private OptionChain m_OptionChain = null;
-	protected Contract m_RealContract;
+	protected Contract m_RealContract = null;
+	protected ContractDetails m_ConDetails = null;
 	protected final IBQuotesSubscriber m_Subscriber;
-	private boolean m_Started = false;
 	private boolean m_VIXEnabled = false;
 	private Double m_VIX = 0.0;
-	private boolean m_PriceChanged = false;
 	private double m_UpStrike = Double.MAX_VALUE;
 	private double m_BotStrike = -1;
 
@@ -35,25 +50,33 @@ public class IBContract extends VContract {
 	protected RealTimeTickDataHandler m_RealTimeTickHandler = null;
 	protected HistoricalDataHandler m_HistBarHandler = null;
 
-	protected final Queue<Bar> m_RealTimeBarQueue = new LinkedList<>();
-	protected final Queue<Tick> m_RealTimeTickQueue = new LinkedList<>();
-	protected final Queue<Bar> m_HistBarQueue = new LinkedList<>();
-	protected final Queue<Tick> m_HistTickQueue = new LinkedList<>();
-
+	protected final Deque<Bar> m_RealTimeBarQueue = new LinkedList<>();
+	protected final Deque<VIXTuple> m_VIXQueue = new LinkedList<>();
+	protected final Deque<Tick> m_RealTimeTickQueue = new LinkedList<>();
+	protected final Deque<Bar> m_HistBarQueue = new LinkedList<>();
+	protected final Deque<Tick> m_HistTickQueue = new LinkedList<>();
+	
 	public final Object m_PriceSync = new Object();
 	public final Object m_OptPriceSync = new Object();
 	public final Object m_VIXSync = new Object();
 	public final Object m_WatchSync = new Object();
+	
+	protected final int m_DefaultQueueSize = 1000;
 
-	public IBContract(Contract c, IBQuotesSubscriber s) {
+	public IBContract(Contract c, IBQuotesSubscriber s) throws Exception {
 		m_Subscriber = s;
 		m_RealContract = c;
 	}
 
-	public boolean IsStarted() {
-		return m_Started;
+	public IBContract SetContractDetails(ContractDetails cd) {
+		m_ConDetails = cd;
+		return this;
 	}
-
+	
+	public ContractDetails GetConDetails() {
+		return m_ConDetails;
+	}
+	
 	public synchronized Double GetVIX() {
 		return m_VIX;
 	}
@@ -71,14 +94,6 @@ public class IBContract extends VContract {
 	public IBContract Bid(double b) {
 		m_RecentBid = b;
 		return this;
-	}
-
-	public boolean IsPriceChanged() {
-		return m_PriceChanged;
-	}
-
-	public void SetPriceChangeFlag(boolean tf) {
-		m_PriceChanged = tf;
 	}
 
 	public synchronized double GetPrice() {
@@ -156,9 +171,11 @@ public class IBContract extends VContract {
 		}
 
 		try {
+			m_Subscriber.m_Mutex.acquire();
 			GetOptionChain();
 			m_OptionChain.StartVIX();
 			m_VIXEnabled = true;
+			m_Subscriber.m_Mutex.release();
 		} catch (Exception e) {
 			e.printStackTrace();
 		}
@@ -189,8 +206,10 @@ public class IBContract extends VContract {
 		}
 
 		try {
+			m_Subscriber.m_Mutex.acquire();
 			m_OptionChain.StopVIX();
 			m_VIXEnabled = false;
+			m_Subscriber.m_Mutex.release();
 			return true;
 		} catch (Exception e) {
 			e.printStackTrace();
@@ -207,15 +226,18 @@ public class IBContract extends VContract {
 		try {
 			switch (type) {
 			case ICommonHandler.REALTIMEBAR:
-				m_RealTimeBarHandler = RealTimeBarHandler.GetRealTimeHandler(this);
+				if (null == m_RealTimeBarHandler)
+					m_RealTimeBarHandler = RealTimeBarHandler.GetRealTimeHandler(this);
 				RequestRealTimeBars();
 				break;
 			case ICommonHandler.HISTORICALBAR:
-				m_HistBarHandler = HistoricalDataHandler.GetHistoricalDataHandler(this);
+				if (null == m_HistBarHandler)
+					m_HistBarHandler = HistoricalDataHandler.GetHistoricalDataHandler(this);
 				RequestHistoricalBars();
 				break;
 			case ICommonHandler.REALTIMETICK:
-				m_RealTimeTickHandler = RealTimeTickDataHandler.GetRealTimeTickHandler(this);
+				if (null == m_RealTimeTickHandler)
+					m_RealTimeTickHandler = RealTimeTickDataHandler.GetRealTimeTickHandler(this);
 				RequestRealTimeTicks();
 				break;
 			}
@@ -251,19 +273,23 @@ public class IBContract extends VContract {
 		return this;
 	}
 
-	public Queue<Bar> GetRealTimeBarsQueue() {
+	public Deque<Bar> GetRealTimeBarsQueue() {
 		return m_RealTimeBarQueue;
 	}
 
-	public Queue<Bar> GetHistBarsQueue() {
+	public Deque<VIXTuple> GetVIXQueue() {
+		return m_VIXQueue;
+	}
+
+	public Deque<Bar> GetHistBarsQueue() {
 		return m_HistBarQueue;
 	}
 
-	public Queue<Tick> GetRealTimeTickQueue() {
+	public Deque<Tick> GetRealTimeTickQueue() {
 		return m_RealTimeTickQueue;
 	}
 
-	public Queue<Tick> GetHistTickQueue() {
+	public Deque<Tick> GetHistTickQueue() {
 		return m_HistTickQueue;
 	}
 
@@ -311,6 +337,7 @@ public class IBContract extends VContract {
 			return this;
 
 		IBQuotesProvider p = (IBQuotesProvider) m_Subscriber.GetProvider();
+		
 		p.controller().reqTopMktData(GetRealContract(), "106", false, false, m_RealTimeTickHandler);
 		return this;
 	}
@@ -327,7 +354,7 @@ public class IBContract extends VContract {
 
 	public Bar TakeBar(int type) {
 		Bar res = null;
-		Queue<Bar> q = null;
+		Deque<Bar> q = null;
 
 		switch (type) {
 		case ICommonHandler.REALTIMEBAR:
@@ -339,15 +366,36 @@ public class IBContract extends VContract {
 		}
 
 		synchronized (q) {
-			if (q != null)
-				res = q.remove();
+			if (null != q && q.size() > 0)
+				res = q.removeFirst();
 		}
 		return res;
 	}
 
+	public void PutBar(int type, Bar bar) {
+		Deque<Bar> q = null;
+
+		switch (type) {
+		case ICommonHandler.REALTIMEBAR:
+			q = m_RealTimeBarQueue;
+			break;
+		case ICommonHandler.HISTORICALBAR:
+			q = m_HistBarQueue;
+			break;
+		}
+
+		synchronized (q) {
+			if (null != q) {
+				q.addLast(bar);
+				if (q.size() > m_DefaultQueueSize)
+					q.removeFirst();
+			}
+		}
+	}
+	
 	public Tick TakeTick(int type) {
 		Tick res = null;
-		Queue<Tick> q = null;
+		Deque<Tick> q = null;
 
 		switch (type) {
 		case ICommonHandler.REALTIMETICK:
@@ -356,9 +404,66 @@ public class IBContract extends VContract {
 		}
 
 		synchronized (q) {
-			if (q != null)
-				res = q.remove();
+			if (null != q && q.size() > 0)
+				res = q.removeFirst();
 		}
 		return res;
 	}
+
+	public void PutTick(int type, Tick tick) {
+
+		Deque<Tick> q = null;
+
+		switch (type) {
+		case ICommonHandler.REALTIMETICK:
+			q = m_RealTimeTickQueue;
+			break;
+		}
+
+		synchronized (q) {
+			if (null != q) {
+				q.addLast(tick);
+				if (q.size() > m_DefaultQueueSize)
+					q.removeFirst();
+			}
+		}
+	}
+	
+	@Override
+	public boolean InOffTime() throws Exception {
+		
+		boolean res = true;
+		TimeZone ny = TimeZone.getTimeZone("US/Eastern");
+		Calendar now_in_us = Calendar.getInstance(ny);
+		
+		for (String th : m_ConDetails.tradingHours().split(";")) {
+			if (th.matches("\\s*")) 
+				continue;
+			String duration[] = th.split("-");
+			String start[] = duration[0].split(":");
+			if (start[1].equals("CLOSED")) continue;
+			String end[] = duration[1].split(":");
+			
+			Calendar st = Calendar.getInstance(ny);
+			int ymd = Integer.parseInt(start[0]);
+			int hm = Integer.parseInt(start[1]);
+			st.clear();
+			st.set(ymd / 10000, ymd % 10000 / 100 - 1, ymd % 100, hm / 100, hm % 100, 0);
+
+			Calendar ed = Calendar.getInstance(ny);
+			ymd = Integer.parseInt(end[0]);
+			hm = Integer.parseInt(end[1]);
+			ed.clear();
+			ed.set(ymd / 10000, (ymd % 10000) / 100 - 1, ymd % 100, hm / 100, hm % 100, 0);
+			
+			if (now_in_us.after(st) && now_in_us.before(ed)) {
+				res = false;
+				break;
+			}
+			
+		}
+		
+		return res;
+	}
+
 }

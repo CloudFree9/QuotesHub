@@ -2,6 +2,8 @@ package com.cloudfree;
 
 import java.io.Serializable;
 import java.util.HashSet;
+import java.util.LinkedList;
+import java.util.Queue;
 import java.util.Set;
 
 public abstract class VContract implements Serializable {
@@ -25,10 +27,13 @@ public abstract class VContract implements Serializable {
 
 	public abstract VContract UnSubscribe(int type);
 
-	public final Set<Object> m_RTBarNotify = new HashSet<Object>();
-	public final Set<Object> m_RTTickNotify = new HashSet<Object>();
-	public final Set<Object> m_HistBarNotify = new HashSet<Object>();
-
+	public abstract boolean InOffTime() throws Exception;
+//	public final Set<Object> m_RTBarNotify = new HashSet<Object>();
+//	public final Set<Object> m_RTTickNotify = new HashSet<Object>();
+//	public final Set<Object> m_HistBarNotify = new HashSet<Object>();
+	
+//	public final Queue<TimeSeriesVIXElement> m_TSQuotes = new LinkedList<TimeSeriesVIXElement>();
+	
 	@Override
 	public boolean equals(Object a1) {
 

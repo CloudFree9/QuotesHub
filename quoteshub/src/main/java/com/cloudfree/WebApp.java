@@ -9,6 +9,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.Semaphore;
 import java.util.concurrent.TimeUnit;
 
 import org.apache.commons.cli.CommandLine;
@@ -118,14 +119,20 @@ public class WebApp {
 		}
 
 		if (cons != null && cons.size() > 0) {
+			
+			
 			for (int conid : cons) {
 				Contract con = new Contract();
+				ContractDetails cd ;
 				con.conid(conid);
 
 				try {
 					List<ContractDetails> cds = subscriber.GetContractDetails(con);
 					if (null != cds && cds.size() > 0) {
 						con = cds.get(0).contract();
+						cd = cds.get(0);
+					} else {
+						continue;
 					}
 				} catch (Exception e) {
 					e.printStackTrace();
@@ -139,18 +146,24 @@ public class WebApp {
 					public void run() {
 						
 						this.setName("VIX enablement for contract " + con1.localSymbol());
-						IBContract ibcon = new IBContract(con1, subscriber);
+						
+						IBContract ibcon;
+						try {
+							ibcon = new IBContract(con1, subscriber).SetContractDetails(cd);
+						} catch (Exception e2) {
+							e2.printStackTrace();
+							return;
+						}
 
 						while (true) {
 							synchronized(hub) {
 								subscriber.Subscribe(ICommonHandler.REALTIMEBAR, ibcon);
 								try {
 									TimeUnit.SECONDS.sleep(3);
+									ibcon.EnableVIX();
 								} catch (InterruptedException e1) {
-									// TODO Auto-generated catch block
 									e1.printStackTrace();
 								}
-								ibcon.EnableVIX();
 							}
 							
 							try {

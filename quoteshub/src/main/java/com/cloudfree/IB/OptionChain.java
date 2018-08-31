@@ -2,17 +2,27 @@ package com.cloudfree.IB;
 
 import java.io.Serializable;
 import java.util.ArrayList;
+import java.util.Calendar;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.TimeZone;
 import java.util.TreeSet;
+import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
+
+import org.bson.Document;
+
+import com.cloudfree.MongoQuotesStore;
 import com.cloudfree.IB.EWrapperHandlers.OptionComputeHandler;
+import com.cloudfree.IB.EWrapperHandlers.RTBarOptHandler;
 import com.cloudfree.IB.EWrapperHandlers.RTTickOptHandler;
 import com.ib.client.Contract;
 import com.ib.client.ContractDetails;
 import com.ib.client.Types;
+import com.ib.client.Types.Right;
 import com.ib.client.Types.SecType;
 import com.ib.controller.ExtController;
 import com.ib.controller.ExtController.ICommonHandler;
@@ -23,19 +33,21 @@ public class OptionChain {
 
 		private static final long serialVersionUID = 202308023907668114L;
 		final private IBContract m_UnderContract;
-		public ContractDetails m_Contract = null;
-		public double m_Volatility = 0;
-		public double m_Delta = 0;
-		public double m_Gamma = 0;
-		public double m_Theta = 0;
-		public double m_Vega = 0;
+
+		public double m_Volatility = 0.0;
+		public double m_Delta = 0.0;
+		public double m_Gamma = 0.0;
+		public double m_Theta = 0.0;
+		public double m_Vega = 0.0;
+		
 		private RTTickOptHandler m_TickOptHandler = RTTickOptHandler.GetRTOptHandler(this);
 
-		public final OptionComputeHandler m_OptComputeHandler = new OptionComputeHandler(this);
+//		public final OptionComputeHandler m_OptComputeHandler = new OptionComputeHandler(this);
 
-		public OptContract(Contract con, IBContract under) {
+		public OptContract(Contract con, IBContract under) throws Exception {
 			super(con, under.GetSubscriber());
 			m_UnderContract = under;
+			m_RealTimeBarHandler = RTBarOptHandler.GetRTBarOptHandler(this);
 		}
 
 		public IBContract GetUnderContract() {
@@ -45,8 +57,13 @@ public class OptionChain {
 		public OptContract RequestOptionVolatility(OptContract con, double price, double underprice,
 				ExtController.IOptHandler h) {
 
-			IBQuotesProvider p = (IBQuotesProvider) m_Subscriber.GetProvider();
-			p.controller().reqOptionVolatility(con.GetRealContract(), price, underprice, h);
+			if (null != con && price > 0.0 && underprice > 0.0 && null != h) {
+				((IBQuotesProvider)m_Subscriber.GetProvider())
+						.controller()
+						.reqOptionVolatility(con.GetRealContract(), price, underprice, h);
+			} else {
+				System.out.println("£¡£¡£¡ WARN: Invalid parameters passed to OptContract::RequestOptionVolatility.");				
+			}
 			return this;
 		}
 
@@ -57,8 +74,9 @@ public class OptionChain {
 				return this;
 
 			if (type == ICommonHandler.REALTIMETICK) {
-				m_RealTimeTickHandler = m_TickOptHandler;
-				RequestRealTimeTicks();
+				RequestRTOptTicks();
+//				m_RealTimeTickHandler = m_TickOptHandler;
+//				RequestRealTimeTicks();
 			} else {
 				super.Subscribe(type);
 			}
@@ -119,7 +137,7 @@ public class OptionChain {
 			}
 		};
 
-		private OptStructBuilderThread m_OptStructWatchThread = new OptStructBuilderThread();
+		private VIXWatchMonThread m_VIXWatchMonThread = new VIXWatchMonThread();
 		private Thread m_WatchThread = null;
 
 		public static final int UPPER = 1;
@@ -132,9 +150,6 @@ public class OptionChain {
 				throw new Exception("Main cotract for optionMap is null!");
 			}
 
-			m_MainContract.m_RTBarNotify.add(this);
-			m_MainContract.m_RTTickNotify.add(this);
-			m_MainContract.m_HistBarNotify.add(this);
 		}
 
 		public void Refresh() {
@@ -142,7 +157,15 @@ public class OptionChain {
 				.stream()
 				.flatMap(e -> e.stream())
 				.forEach(oc -> {
-					oc.Subscribe(ICommonHandler.REALTIMETICK);
+					try {
+//						oc.UnSubscribe(ICommonHandler.REALTIMETICK);
+//						TimeUnit.SECONDS.sleep(3);
+						oc.Subscribe(ICommonHandler.REALTIMETICK);
+						TimeUnit.SECONDS.sleep(3);
+					} catch (InterruptedException e1) {
+						// TODO Auto-generated catch block
+						e1.printStackTrace();
+					}
 				});
 		}
 
@@ -166,22 +189,44 @@ public class OptionChain {
 
 		public OptionMap UpdateVIXWatchList() throws Exception {
 
-			if (!m_MainContract.IsVixEnabled() || m_Map == null || m_Map.size() == 0)
+			if (!m_MainContract.IsVixEnabled() || m_Map == null || m_Map.isEmpty())
 				return this;
 
-			final double up_price;
-			final double bot_price;
-
-			final double underprice = GetUnderlyingPrice();
-
+			double up_price = -1.0;
+			double bot_price = -1.0;
+			double u_price = -1.0;
+			
+			while (u_price <= 0) {
+				u_price = GetUnderlyingPrice();
+				
+				// Wait until underlying instrument gets a valid price
+				if (u_price <= 0) {
+					System.out.printf(">>>> The valid underlying price of %s is still not received, ignored this round <<<\n", m_MainContract.GetRealContract().localSymbol());
+					TimeUnit.SECONDS.sleep(2);
+				}
+			}
+			
+			long t_date = m_LastOptDate;
+			String tdcls = m_MonthlyTradingCls;
+			
+			for (Long t_dt : m_Map.keySet()) {
+				if (t_dt < t_date && m_Map.get(t_dt)
+						.values()
+						.stream()
+						.limit(1)
+						.flatMap(e -> e.values().stream())
+						.limit(1)
+						.anyMatch(e -> {
+							return e.m_RealContract.tradingClass().equals(tdcls);
+						})) {
+					t_date = t_dt;
+				}
+			}
+			
 			/*
 			 * Filter the whole option map with the option's contract month is the same as the underlying future.
 			 */
-			final List<HashMap<Double, HashMap<Types.Right, OptContract>>> cons =
-					m_Map.entrySet()
-					.stream()
-					.map(e -> e.getValue())
-					.collect(Collectors.toList());
+			final HashMap<Double, HashMap<Types.Right, OptContract>> cons = m_Map.get(t_date);
 			
 			if (null == cons || cons.isEmpty())
 				throw new Exception("No corresponding options found.");
@@ -189,17 +234,24 @@ public class OptionChain {
 			/*
 			 * Get the strike price pair which embraces the current underlying price tightly
 			 */
-			Set<Double> stirke_prices = cons.get(0).keySet();
-
-			bot_price = stirke_prices.stream().filter(e -> e <= underprice).max((e1, e2) -> e1.compareTo(e2))
-					.orElse(new Double(-1.0));
-
-			up_price = stirke_prices.stream().filter(e -> e > underprice).min((e1, e2) -> e1.compareTo(e2))
-					.orElse(new Double(-1.0));
+			List<Double> stirke_prices = cons.keySet().stream().collect(Collectors.toList());
+			stirke_prices.sort(Double::compare);
+			
+			if (stirke_prices.size() < 2) 
+				throw new Exception("Not enough options found.");
+			
+			for (int i=1; i<stirke_prices.size(); i++) {
+				if (stirke_prices.get(i-1) <= u_price && u_price < stirke_prices.get(i)) {
+					bot_price = stirke_prices.get(i-1);
+					up_price = stirke_prices.get(i);
+					break;
+				}
+			}
 
 			if (bot_price == -1.0 || up_price == -1.0)
 				throw new Exception("Error on getting UP || Down strike price.");
 
+			// Update the up/bottom price to underlying contract data fields
 			if (bot_price != m_MainContract.GetBotStrike() || up_price != m_MainContract.GetUpStrike()) {
 				m_MainContract.SetBotStrike(bot_price);
 				m_MainContract.SetUpStrike(up_price);
@@ -207,42 +259,38 @@ public class OptionChain {
 				return this;
 			}
 
-			List<OptContract> ulist = new ArrayList<>();
-			List<OptContract> blist = new ArrayList<>();
-
-			cons.stream()
-				.flatMap(e -> e.entrySet().stream())
-				.filter(e -> (e.getKey() == up_price || e.getKey() == bot_price))
-				.forEach(m -> {
-					double p = m.getKey();
-					List<OptContract> tl = p == up_price ? ulist : blist;
-					tl.add(m.getValue().get(Types.Right.Call));
-					tl.add(m.getValue().get(Types.Right.Put));
-				});
-
 			synchronized (m_VIXWatchList) {
 
 				m_VIXWatchList
 					.stream()
 					.flatMap(l -> l.stream())
 					.forEach(c -> {
-						c.UnSubscribe(ICommonHandler.REALTIMETICK);
+//						c.UnSubscribe(ICommonHandler.REALTIMETICK);
+						try {
+							TimeUnit.SECONDS.sleep(3);
+						} catch (InterruptedException e) {
+							// TODO Auto-generated catch block
+							e.printStackTrace();
+						}
 					});
 				
 				synchronized (m_WatchList) {
-//					m_WatchList.removeAll(lv);
 					m_VIXWatchList.get(UPPER).clear();
 					m_VIXWatchList.get(LOWER).clear();
-					m_VIXWatchList.get(LOWER).addAll(blist);
-					m_VIXWatchList.get(UPPER).addAll(ulist);
-					m_WatchList.addAll(blist);
-					m_WatchList.addAll(ulist);
+					m_VIXWatchList.get(LOWER).addAll(cons.get(bot_price).values());
+					m_VIXWatchList.get(UPPER).addAll(cons.get(up_price).values());
 				}
 
 				m_VIXWatchList.stream().flatMap(s -> s.stream()).forEach(c -> {
 					System.out.printf("Subscribe option quotes for %s %s", c.m_RealContract.localSymbol(),
 							c.m_RealContract.lastTradeDateOrContractMonth());
 					c.Subscribe(ICommonHandler.REALTIMETICK);
+					try {
+						TimeUnit.SECONDS.sleep(3);
+					} catch (InterruptedException e) {
+						// TODO Auto-generated catch block
+						e.printStackTrace();
+					}
 				});
 
 			}
@@ -281,7 +329,7 @@ public class OptionChain {
 			synchronized (m_WatchList) {
 
 				List<OptContract> temp = m_WatchList.stream().filter(opt -> {
-					Contract con = opt.m_Contract.contract();
+					Contract con = opt.m_ConDetails.contract();
 					boolean dt = true;
 					boolean stk = true;
 					boolean rt = true;
@@ -300,12 +348,12 @@ public class OptionChain {
 			return this;
 		}
 
-		private class OptStructBuilderThread implements Runnable {
+		private class VIXWatchMonThread implements Runnable {
 
 			@Override
 			public void run() {
 
-				Thread.currentThread().setName("Option struct watch monitor");
+				Thread.currentThread().setName("VIX watch monitor");
 				while (true) {
 					try {
 						UpdateVIXWatchList();
@@ -320,12 +368,12 @@ public class OptionChain {
 			}
 		}
 
-		public void StartOptStructWatch(boolean refresh) {
+		public void StartVIXWatch(boolean refresh) {
 
 			if (m_WatchThread != null && m_WatchThread.isAlive())
 				return;
 
-			m_WatchThread = new Thread(m_OptStructWatchThread);
+			m_WatchThread = new Thread(m_VIXWatchMonThread);
 			m_WatchThread.start();
 
 			if (refresh) {
@@ -335,7 +383,7 @@ public class OptionChain {
 			}
 		}
 
-		public void StopOptStructWatch() {
+		public void StopVIXWatch() {
 			if (null == m_WatchThread|| !m_WatchThread.isAlive())
 				return;
 			m_WatchThread.interrupt();
@@ -351,9 +399,10 @@ public class OptionChain {
 	final private IBContract m_MainContract; // underlying instrument of the options
 	final private OptionMap m_OptionMap;
 	final private IBQuotesSubscriber m_IBSubscriber;
-	final public ContractDetails m_MConDetails;
+	protected long m_LastOptDate = 0;
+	protected String m_MonthlyTradingCls;
 
-	private boolean m_VIXStop = true;
+	private boolean m_VIXCalcStop = true;
 
 	public OptionChain(IBQuotesSubscriber s, IBContract underlying) throws Exception {
 
@@ -362,12 +411,13 @@ public class OptionChain {
 		m_OptionMap = new OptionMap();
 
 		List<ContractDetails> cons = m_IBSubscriber.GetContractDetails(underlying.GetRealContract());
-		m_MConDetails = cons.size() > 0 ? cons.get(0) : null;
-
-		if (m_MConDetails == null)
+		ContractDetails cd = cons.size() > 0 ? cons.get(0) : null;
+		
+		if (null == cd)
 			throw new Exception("Invalid main contract to retrieve the option chain.");
 
-		m_MainContract.SetRealContract(m_MConDetails.contract());
+		m_MainContract.SetRealContract(cd.contract());
+		m_MainContract.SetContractDetails(cd);
 
 		RebuildMaps();
 	}
@@ -453,8 +503,15 @@ public class OptionChain {
 				HashMap<Types.Right, OptContract> opt = item.get(strike);
 
 				OptContract optcontract = new OptContract(con.contract(), m_MainContract);
-				optcontract.m_Contract = con;
+				optcontract.m_ConDetails = con;
+				optcontract.SetContractDetails(con);
 				opt.put(con.contract().right(), optcontract);
+				
+				long tradingend = Long.parseLong(optcontract.m_RealContract.lastTradeDateOrContractMonth());
+				if (tradingend > m_LastOptDate) {
+					m_LastOptDate = tradingend;
+					m_MonthlyTradingCls = optcontract.m_RealContract.tradingClass();
+				}
 			}
 
 			m_OptionMap.m_Map.clear();
@@ -466,57 +523,73 @@ public class OptionChain {
 
 	public void StartVIX() throws Exception {
 
+		// Start monitor for VIX participants - selected option contracts, which are
+		// dynamic with accordance to the underlying price change
 		synchronized (m_OptionMap) {
-			m_OptionMap.StartOptStructWatch(true);
+			m_OptionMap.StartVIXWatch(true);
 			synchronized (m_MainContract.m_WatchSync) {
 				m_MainContract.m_WatchSync.notifyAll();
 			}
 		}
 
-		/*
-		new Thread() {
-			@Override
-			public void run() {
-				Thread.currentThread().setName("NULL Option price checker");
-
-				while (true) {
-					try {
-						Thread.sleep(3000);
-					} catch (InterruptedException e1) {
-						e1.printStackTrace();
-					}
-					
-					long count = m_OptionMap.m_VIXWatchList.stream().flatMap(e -> e.stream())
-							.filter(e -> e.GetPrice() == 0.0).count();
-					long count1 = m_OptionMap.m_VIXWatchList.stream().flatMap(e -> e.stream()).count();
-					System.out.printf(">>>> Warning: there are %d options with the price of ZERO, total: %d\n", count,
-							count1);
-
-				}
-			}
-		}.start();
-		*/
-		
+		// Start VIX calculation
 		new Thread() {
 			@Override
 			public void run() {
 
-				m_VIXStop = false;
+				int count = ((IBQuotesProvider)(m_IBSubscriber.GetProvider())).GetVixServePerSubs();
+				int total = ((IBQuotesProvider)(m_IBSubscriber.GetProvider())).GetVixServePerSession();
+				
+				m_VIXCalcStop = false;
 				Thread.currentThread().setName("VIX Calaulator");
-				while (!m_VIXStop) {
+				while (!m_VIXCalcStop) {
 
 					try {
-						synchronized (m_MainContract.m_VIXSync) {
-							m_MainContract.m_VIXSync.wait(5000);
+						if (m_IBSubscriber.IsWeekend() || m_MainContract.InOffTime()) {
+							System.out.printf("Contract '%s' is Not in trading hours!\n", m_MainContract.GetRealContract().localSymbol());
+							TimeUnit.MINUTES.sleep(5);
+							continue;
 						}
 
 						synchronized (m_MainContract.GetVIX()) {
 							CalculateVIX();
+							count--; total--;
 						}
 
-						System.out.printf("\n\n++++++ The overall VIX value for %s is: %f ++++++\n\n", m_MainContract.GetRealContract().localSymbol(), m_MainContract.GetVIX());
-						Thread.sleep(5000);
-					} catch (InterruptedException e) {
+						if (m_MainContract.GetVIX() > 0.0) {
+					        MongoQuotesStore IBQuotesdb = (MongoQuotesStore)(m_MainContract.GetSubscriber().GetProvider()).GetPersistenceStore();
+	
+					        try {
+					        	
+					        	String collection = String.format("VIX_%s_%s_%d", 
+					        			m_MainContract.GetRealContract().symbol(),
+					        			m_MainContract.GetRealContract().lastTradeDateOrContractMonth(),
+					        			m_MainContract.GetRealContract().conid()
+					        			);
+					        	
+								IBQuotesdb.Put(collection, new Document()
+										.append("ts", Calendar.getInstance(TimeZone.getTimeZone("US/Eastern")).getTimeInMillis())
+										.append("vix", m_MainContract.GetVIX()));
+							} catch (Exception e) {
+								e.printStackTrace();
+							}
+						}
+
+						System.out.printf("\n\n++++++ The overall VIX value for %s %s is: %f ++++++\n\n", m_MainContract.GetRealContract().symbol(), m_MainContract.GetRealContract().lastTradeDateOrContractMonth(), m_MainContract.GetVIX());
+						TimeUnit.SECONDS.sleep(5);
+						
+						if (total <= 0) {
+							System.exit(0);
+						}
+/*						
+						if (count <= 0) {
+							m_IBSubscriber.DisableVIX(m_MainContract);
+							TimeUnit.SECONDS.sleep(3);
+							m_IBSubscriber.EnableVIX(m_MainContract);
+							break;
+						}
+						*/
+					} catch (Exception e) {
 						e.printStackTrace();
 					}
 				}
@@ -528,11 +601,11 @@ public class OptionChain {
 	public void StopVIX() {
 
 		synchronized (m_MainContract.GetVIX()) {
-			m_VIXStop = true;
+			m_VIXCalcStop = true;
 		}
 
 		synchronized (m_OptionMap) {
-			m_OptionMap.StopOptStructWatch();
+			m_OptionMap.StopVIXWatch();
 		}
 
 	}
@@ -553,7 +626,7 @@ public class OptionChain {
 
 				HashMap<Types.Right, OptContract> pair = items.get(strike);
 				for (Types.Right r : pair.keySet()) {
-					System.out.printf("[%s: %d]\t", r.toString(), pair.get(r).m_Contract.conid());
+					System.out.printf("[%s: %d]\t", r.toString(), pair.get(r).m_ConDetails.conid());
 					icount++;
 				}
 				System.out.println();
@@ -570,7 +643,7 @@ public class OptionChain {
 	}
 
 	public ContractDetails GetMainContractDetails() {
-		return m_MConDetails;
+		return null == m_MainContract ? null : m_MainContract.m_ConDetails;
 	}
 
 	public OptionMap GetOptionMap() {
